@@ -1,0 +1,1000 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>合肥3C站点 · 工程师网格地图</title>
+<style>
+  *{box-sizing:border-box;-webkit-font-smoothing:antialiased;}
+  html,body{margin:0;padding:0;height:100%;overflow:hidden;
+    font-family:"PingFang SC","Hiragino Sans GB","Microsoft YaHei",system-ui,-apple-system,"Helvetica Neue",Arial,sans-serif;
+    background:#eef1f6;color:#0f172a;}
+  #map{position:fixed;left:0;top:0;width:100vw;height:100vh;z-index:0;background:#eef1f6;}
+  #labelLayer{position:fixed;left:0;top:0;right:0;bottom:0;z-index:10;pointer-events:none;overflow:hidden;}
+  /* 原生 BMap.Label 容器去默认样式：标签外观完全由自绘 .gl 块决定 */
+  #map .BMapLabel{background:none!important;border:0!important;padding:0!important;margin:0!important;
+      box-shadow:none!important;white-space:nowrap!important;pointer-events:none!important;overflow:visible!important;}
+  #map .BMapLabel .gl{position:relative;left:0;top:0;visibility:visible;}
+
+  /* ---------- 网格标签（还原旧版卡片外观：白底卡片 + 名称行色块白字 + 深色姓名行；
+       名称行色块与卡片边框按“网格名称前缀（词根）”统一着色，同前缀同色、异前缀异色，颜色由 prefixColor() 注入） ---------- */
+  .gl{position:absolute;background:rgba(255,255,255,.95);border:1.6px solid var(--c);
+      border-radius:7px;overflow:hidden;white-space:nowrap;text-align:center;pointer-events:none;
+      box-shadow:0 2px 6px rgba(15,23,42,.28);}
+  .gl-h{color:#fff;font-weight:800;padding:2px 8px 2px;line-height:1.3;letter-spacing:.4px;
+      text-shadow:0 1px 1px rgba(0,0,0,.22);}
+  .gl-min .gl-h{padding:1px 5px 1px;letter-spacing:.2px;}
+  .gl-b{padding:2px 5px 4px;}
+  .gl-e{display:flex;align-items:center;justify-content:flex-start;gap:4px;font-weight:700;
+      color:#101828;line-height:1.45;}
+  .gl-e i{width:8px;height:8px;border-radius:2px;flex:0 0 auto;box-shadow:0 0 0 1px rgba(0,0,0,.18) inset;}
+
+  /* ---------- 顶部标题 ---------- */
+  #topbar{position:fixed;z-index:30;left:18px;top:16px;display:flex;align-items:center;gap:14px;
+    background:rgba(255,255,255,.96);border:1px solid rgba(15,23,42,.10);border-radius:12px;
+    padding:10px 16px;box-shadow:0 6px 20px rgba(15,23,42,.14);}
+  #topbar .t1{font-size:17px;font-weight:800;letter-spacing:.4px;}
+  #topbar .t2{font-size:12px;color:#5b667a;margin-top:2px;}
+  #topbar .sep{width:1px;height:30px;background:rgba(15,23,42,.10);}
+  .btn{border:1px solid rgba(15,23,42,.16);background:#fff;border-radius:8px;padding:6px 11px;
+    font-size:12.5px;cursor:pointer;color:#1f2a44;font-weight:600;transition:.15s;}
+  .btn:hover{background:#f2f5fa;border-color:rgba(15,23,42,.3);}
+  .btn.active{background:#1d4ed8;border-color:#1d4ed8;color:#fff;}
+
+  /* ---------- 侧栏 ---------- */
+  #side{position:fixed;z-index:30;left:18px;top:88px;bottom:18px;width:322px;display:flex;flex-direction:column;
+    gap:12px;pointer-events:none;}
+  #side .card{pointer-events:auto;background:rgba(255,255,255,.97);border:1px solid rgba(15,23,42,.10);
+    border-radius:12px;box-shadow:0 6px 20px rgba(15,23,42,.13);overflow:hidden;}
+  .card-t{font-size:12.5px;font-weight:800;letter-spacing:.5px;color:#334155;padding:9px 12px;
+    background:linear-gradient(#f8fafc,#eef2f8);border-bottom:1px solid rgba(15,23,42,.07);
+    display:flex;justify-content:space-between;align-items:center;}
+  .card-t span.hint{font-weight:600;color:#7c8798;font-size:11.5px;}
+  .card-b{padding:10px 12px;}
+  .row{display:flex;gap:8px;align-items:center;margin-bottom:8px;}
+  .row:last-child{margin-bottom:0;}
+  input[type=text],select{flex:1;min-width:0;border:1px solid rgba(15,23,42,.18);border-radius:8px;
+    padding:7px 9px;font-size:13px;color:#101828;background:#fff;outline:none;font-family:inherit;}
+  input[type=text]:focus,select:focus{border-color:#1d4ed8;box-shadow:0 0 0 3px rgba(29,78,216,.12);}
+  .msg{font-size:12px;color:#5b667a;line-height:1.6;margin-top:2px;min-height:0;}
+  .msg.ok{color:#0b7a3b;font-weight:700;}
+  .msg.err{color:#b42318;font-weight:700;}
+
+  #catWrap{flex:1;min-height:0;display:flex;flex-direction:column;overflow:hidden;}
+  #cat{overflow-y:auto;padding:6px 8px 10px;}
+  .cat-item{display:flex;gap:8px;align-items:flex-start;padding:6px 7px;border-radius:8px;cursor:pointer;
+    border:1px solid transparent;}
+  .cat-item:hover{background:#f1f5fb;border-color:rgba(29,78,216,.25);}
+  .cat-item.sel{background:#e8effc;border-color:#1d4ed8;}
+  .cat-sw{width:13px;height:13px;border-radius:3px;margin-top:3px;flex:0 0 auto;
+    box-shadow:0 0 0 1px rgba(0,0,0,.2) inset;}
+  .cat-name{font-size:12.8px;font-weight:800;color:#101828;}
+  .cat-reg{font-size:11px;color:#7c8798;font-weight:600;margin-left:5px;}
+  .cat-engs{display:flex;flex-wrap:wrap;gap:3px 6px;margin-top:3px;}
+  .cat-eng{display:inline-flex;align-items:center;gap:3px;font-size:11.5px;color:#334155;font-weight:600;}
+  .cat-eng i{width:7px;height:7px;border-radius:2px;flex:0 0 auto;}
+
+  /* ---------- 详情面板 ---------- */
+  #panel{position:fixed;z-index:30;right:18px;bottom:18px;width:300px;background:rgba(255,255,255,.97);
+    border:1px solid rgba(15,23,42,.10);border-radius:12px;box-shadow:0 8px 26px rgba(15,23,42,.18);
+    overflow:hidden;transform:translateY(12px);opacity:0;pointer-events:none;transition:.18s;}
+  #panel.on{transform:none;opacity:1;pointer-events:auto;}
+  .p-h{display:flex;justify-content:space-between;align-items:center;padding:9px 12px;
+    background:linear-gradient(#f8fafc,#eef2f8);border-bottom:1px solid rgba(15,23,42,.07);}
+  .p-h b{font-size:13.5px;}
+  .p-h button{border:none;background:transparent;font-size:18px;line-height:1;cursor:pointer;color:#7c8798;}
+  .p-b{padding:10px 12px 12px;}
+  .p-row{display:flex;justify-content:space-between;gap:10px;font-size:12.5px;padding:3.5px 0;}
+  .p-row b{color:#7c8798;font-weight:600;}
+  .p-row span{font-weight:700;color:#101828;text-align:right;}
+  .p-sub{font-size:12px;color:#7c8798;font-weight:700;margin:9px 0 4px;}
+  .p-eng{display:flex;align-items:center;gap:6px;font-size:13px;font-weight:700;padding:3px 0;}
+  .p-eng i{width:10px;height:10px;border-radius:3px;flex:0 0 auto;box-shadow:0 0 0 1px rgba(0,0,0,.2) inset;}
+  .p-addr{margin-top:9px;font-size:12px;line-height:1.6;color:#0b7a3b;font-weight:700;
+    border-top:1px dashed rgba(15,23,42,.14);padding-top:8px;word-break:break-all;}
+  .p-addr.err{color:#b42318;}
+
+  /* ---------- 海报模式专属 ---------- */
+  .poster-only{display:none;}
+  body.poster .poster-only{display:block;}
+  body.poster #side,body.poster #panel,body.poster #hoverTip{display:none !important;}
+  /* 海报模式下隐藏交互顶栏：避免与海报标题卡重叠、并防止把交互按钮渲染进静态图 */
+  body.poster #topbar{display:none !important;}
+  #posterTitle{position:fixed;z-index:30;left:26px;top:24px;background:rgba(255,255,255,.95);
+    border:1px solid rgba(15,23,42,.10);border-left:7px solid #1d4ed8;border-radius:12px;
+    padding:14px 22px 15px;box-shadow:0 8px 26px rgba(15,23,42,.16);}
+  #posterTitle .pt-main{font-size:30px;font-weight:900;letter-spacing:1.2px;color:#0b1736;}
+  #posterTitle .pt-sub{font-size:14px;color:#4a5670;font-weight:600;margin-top:7px;letter-spacing:.3px;}
+  #posterNote{position:fixed;z-index:30;left:26px;bottom:26px;background:rgba(255,255,255,.95);
+    border:1px solid rgba(15,23,42,.10);border-radius:12px;padding:12px 18px 13px;
+    box-shadow:0 8px 26px rgba(15,23,42,.16);max-width:470px;}
+  #posterNote .pn-main{font-size:14px;font-weight:900;color:#0b1736;margin-bottom:7px;letter-spacing:.6px;}
+  #posterNote .pn-line{font-size:12.6px;color:#334155;font-weight:600;line-height:1.85;display:flex;gap:7px;align-items:baseline;}
+  #posterNote .sw{display:inline-block;width:30px;height:11px;border-radius:3px;flex:0 0 auto;transform:translateY(1px);}
+  #posterNote .pn-note{font-size:12.2px;color:#8a5a00;font-weight:700;margin-top:7px;
+    background:#fff7e6;border:1px solid #ffe0a3;border-radius:7px;padding:5px 9px;}
+  #statChip{position:fixed;z-index:30;right:26px;top:24px;background:rgba(255,255,255,.95);
+    border:1px solid rgba(15,23,42,.10);border-radius:12px;padding:12px 20px;box-shadow:0 8px 26px rgba(15,23,42,.16);
+    display:flex;gap:26px;}
+  #statChip .sc{text-align:center;}
+  #statChip .sc b{display:block;font-size:26px;font-weight:900;color:#1d4ed8;line-height:1.15;}
+  #statChip .sc span{font-size:12px;color:#5b667a;font-weight:700;}
+
+  #hoverTip{position:fixed;z-index:40;pointer-events:none;background:rgba(11,23,54,.92);color:#fff;
+    font-size:12px;padding:5px 9px;border-radius:6px;display:none;}
+  #loading{position:fixed;z-index:60;left:50%;top:50%;transform:translate(-50%,-50%);
+    background:rgba(255,255,255,.96);border-radius:10px;padding:14px 24px;font-size:14px;font-weight:700;
+    box-shadow:0 8px 26px rgba(15,23,42,.18);}
+</style>
+</head>
+<body>
+<div id="map"></div>
+<div id="labelLayer"></div>
+
+<header id="topbar">
+  <div>
+    <div class="t1">合肥3C站点 · 工程师网格地图</div>
+    <div class="t2" id="topSub">共 —— 个网格 / —— 位工程师 · 数据来源：天工系统（2026-10-07 13:21）</div>
+  </div>
+  <div class="sep"></div>
+  <button class="btn active" id="btnName">姓名标注：开</button>
+  <button class="btn" id="btnReset">重置视图</button>
+</header>
+
+<div id="posterTitle" class="poster-only">
+  <div class="pt-main">合肥3C站点 · 工程师网格地图</div>
+  <div class="pt-sub" id="ptSub">全城总览 ｜ 数据来源：天工系统 2026-10-07 13:21</div>
+</div>
+<div id="statChip" class="poster-only">
+  <div class="sc"><b id="scGrid">-</b><span>网格</span></div>
+  <div class="sc"><b id="scEng">-</b><span>工程师</span></div>
+  <div class="sc"><b id="scBind">-</b><span>负责关系</span></div>
+</div>
+<div id="posterNote" class="poster-only">
+  <div class="pn-main">读图说明</div>
+  <div class="pn-line"><i class="sw" style="background:rgba(51,51,255,.25);border:3px solid #0000FF"></i><span>蓝色多边形＝一个网格（原天工系统配色：填充 #3333FF / 透明度 25%，边界线 #0000FF / 4px / 实线 / 透明度 85%）</span></div>
+  <div class="pn-line"><i class="sw" style="background:linear-gradient(90deg,#C91904,#5C4600,#0A8904,#035453,#0073D6,#30175E,#D600A3)"></i><span>标签首行色块＝网格名称，颜色按网格名称前缀统一（包河/瑶海/肥东/北城/蜀山/肥西/滨湖 各一色，同前缀同色）；卡片边框与首行同色；下方每行＝一名负责工程师</span></div>
+  <div class="pn-line"><i class="sw" style="background:linear-gradient(90deg,#e42573,#22c1c3)"></i><span>姓名前的彩色小方块＝该工程师的专属标识色，姓名与网格名称标注互不重叠</span></div>
+  <div class="pn-note">本图为静态总览，不含选中态（网页版点击网格的红色虚框高亮仅存在于交互页）。图中展示网格、网格名称与负责工程师，不含单量与夜配单量数据；停止接单状态的工程师已不显示（共 <span id="pnStopCnt">-</span> 名）。</div>
+</div>
+
+<aside id="side">
+  <div class="card">
+    <div class="card-t">订单地址搜索<span class="hint">输入地址 → 定位所属网格</span></div>
+    <div class="card-b">
+      <div class="row">
+        <input type="text" id="addr" placeholder="如：合肥市包河区望江东路188号">
+        <button class="btn" id="addrBtn">定位</button>
+      </div>
+      <div class="msg" id="addrMsg">支持门牌/小区/道路交叉口；定位后自动高亮所属网格并显示负责工程师。</div>
+      <div class="pn-note">放大地图（滚轮/双指）后，网格内会直接标注出该网格全部负责工程师姓名；点选网格或搜索地址亦可随时查看。</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-t">按网格 / 工程师查找</div>
+    <div class="card-b">
+      <div class="row">
+        <select id="gridSel"></select>
+        <button class="btn" id="gridBtn">定位网格</button>
+      </div>
+      <div class="row">
+        <select id="engSel"></select>
+        <button class="btn" id="engBtn">定位工程师</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="card" id="catWrap">
+    <div class="card-t">网格清单 · 配色图例<span class="hint" id="catCnt"></span></div>
+    <div id="cat"></div>
+  </div>
+</aside>
+
+<div id="panel">
+  <div class="p-h"><b id="pTitle">网格详情</b><button id="pClose">×</button></div>
+  <div class="p-b">
+    <div class="p-row"><b>网格名称</b><span id="pName">--</span></div>
+    <div class="p-row"><b>网格编号</b><span id="pCode">--</span></div>
+    <div class="p-row"><b>所属区域</b><span id="pRegion">--</span></div>
+    <div class="p-sub">负责工程师（<span id="pCnt">0</span> 人）</div>
+    <div id="pEngs"></div>
+    <div id="pAddr" class="p-addr" style="display:none"></div>
+  </div>
+</div>
+
+<div id="hoverTip"></div>
+<div id="loading">地图加载中…</div>
+
+<script>
+/* ============================================================================
+ * 合肥3C站点 · 工程师网格地图
+ * ----------------------------------------------------------------------------
+ * 数据块 GRID_DATA（本文件中以此命名的常量）为唯一数据源，字段说明：
+ *   city / site / generatedAt       : 城市、站点、生成时间
+ *   grids[]                         : 每个网格一条
+ *       gridId    : 天工系统网格ID
+ *       gridName  : 网格名称（如 包河5）
+ *       gridCode  : 网格编号
+ *       region    : 所属区县
+ *       points    : 网格多边形顶点 [[lng,lat], ...]（来自 gridData 真实坐标）
+ *       engineers : [{id, name}] 该网格的负责工程师（真实绑定关系）
+ *       color     : 网格配色（重新设计，相邻网格颜色不同）
+ *   engineerColors{id:hex}          : 每位工程师的专属标识色
+ * 后期网格调整：只需用新数据重新生成 GRID_DATA 后替换本段即可同步，其余逻辑无需改动。
+ * 备注：不包含单量、夜配单量、接单状态等数据。
+ * ========================================================================== */
+const GRID_DATA = {"city":"合肥市","site":"合肥包河区3C站点","generatedAt":"2026-10-07 13:21:16","dataDate":"2026-10-07 13:21","regionOrder":["庐阳区","瑶海区","包河区","长丰县","蜀山区","肥西县","肥东县"],"grids":[{"gridId":3310,"gridName":"肥西3","gridCode":"3401000001","region":"肥西县","points":[[117.1933448,31.7493041],[117.2127556,31.7319452],[117.2377662,31.7317253],[117.2123047,31.685137],[117.1825378,31.6849616],[117.1832663,31.7258737],[117.17345,31.7337975],[117.1933448,31.7493041]],"engineers":[{"id":4811407,"name":"孙凯程"},{"id":4854580,"name":"杨国超"}],"color":"#B80000"},{"gridId":3311,"gridName":"北城2","gridCode":"3401000002","region":"长丰县","points":[[117.2117289,31.9441318],[117.1859114,31.9759827],[117.1912657,31.9846498],[117.2005258,31.9863564],[117.2648557,32.0002034],[117.3118867,32.005853],[117.312044,31.9678885],[117.3084393,31.9624787],[117.3059063,31.9616091],[117.2912018,31.9592],[117.2769443,31.9577253],[117.2620007,31.9551649],[117.2523437,31.9494812],[117.2117289,31.9441318]],"engineers":[{"id":4842288,"name":"付奥博"},{"id":4684786,"name":"王俊"},{"id":4841443,"name":"谢涛涛"}],"color":"#45E645"},{"gridId":3391,"gridName":"蜀山3","gridCode":"3401000020","region":"蜀山区","points":[[117.0814813,31.8357131],[117.0865077,31.8737531],[117.0927272,31.8732291],[117.1055043,31.878481],[117.1367516,31.8807679],[117.1678628,31.8826915],[117.1652999,31.8368748],[117.1376463,31.8364975],[117.0814813,31.8357131]],"engineers":[{"id":4815903,"name":"王晓东"}],"color":"#04D104"},{"gridId":3401,"gridName":"滨湖1","gridCode":"3401000030","region":"肥西县","points":[[117.3862484,31.8135451],[117.3867891,31.8103079],[117.3905878,31.8090464],[117.3983962,31.8082353],[117.3961315,31.7854472],[117.3991178,31.7792824],[117.3962001,31.7773366],[117.3447581,31.7762932],[117.3446653,31.7730682],[117.3257082,31.7726655],[117.2872395,31.7729598],[117.2858288,31.800551],[117.3244514,31.8045498],[117.3429944,31.8083982],[117.3709856,31.8098952],[117.3862484,31.8135451]],"engineers":[{"id":4877234,"name":"石国红"}],"color":"#45E6C5"},{"gridId":3403,"gridName":"滨湖2","gridCode":"3401000032","region":"肥西县","points":[[117.3447581,31.7762932],[117.3962001,31.7773366],[117.3952304,31.7723385],[117.3911035,31.7674903],[117.3862069,31.7575983],[117.3827297,31.7463248],[117.3861373,31.74299],[117.3840863,31.7408964],[117.3827265,31.7373008],[117.3806442,31.7367197],[117.3777545,31.7337778],[117.3809841,31.7298914],[117.3834946,31.7267047],[117.3843845,31.7225209],[117.3792587,31.7240476],[117.3750429,31.7256514],[117.3448118,31.7303103],[117.2757919,31.7303101],[117.2861096,31.7538189],[117.2875134,31.7622698],[117.2876725,31.7725578],[117.2929721,31.7725679],[117.3163195,31.7725455],[117.3198091,31.7722085],[117.3257082,31.7726655],[117.3446653,31.7730682],[117.3447581,31.7762932]],"engineers":[{"id":4577401,"name":"葛嘉"},{"id":4833906,"name":"陶伟健"}],"color":"#D1047F"},{"gridId":3404,"gridName":"瑶海1","gridCode":"3401000033","region":"瑶海区","points":[[117.4357353,31.9306509],[117.4258588,31.8971901],[117.396686,31.897997],[117.3783245,31.8947503],[117.3696741,31.8912846],[117.3336037,31.891169],[117.3163715,31.8976673],[117.3050902,31.9055332],[117.3057543,31.906494],[117.30512,31.9082622],[117.3055838,31.910093],[117.3027668,31.9118654],[117.3030408,31.9137543],[117.3015024,31.9155948],[117.3025638,31.9176384],[117.3042847,31.9190741],[117.3033807,31.9204075],[117.3039569,31.9220523],[117.3066833,31.9237012],[117.3056649,31.9255334],[117.306249,31.9269187],[117.3040752,31.9302651],[117.3035957,31.9335152],[117.3038932,31.9370952],[117.3011961,31.9387308],[117.3044986,31.9452205],[117.30566,31.945919],[117.3056143,31.9508664],[117.3085569,31.953912],[117.312724,31.9510546],[117.3805873,31.9315808],[117.4357353,31.9306509]],"engineers":[{"id":4597951,"name":"徐勇"},{"id":4882695,"name":"杨浩"},{"id":4723629,"name":"谢彪"}],"color":"#0093B8"},{"gridId":3548,"gridName":"包河3","gridCode":"3401000037","region":"包河区","points":[[117.3143202,31.8559951],[117.3179215,31.8591848],[117.3337549,31.8546634],[117.3408972,31.8547482],[117.348858,31.8525325],[117.3517691,31.8614021],[117.354219,31.8666493],[117.3549374,31.8912374],[117.3486594,31.8910773],[117.3336037,31.891169],[117.3163715,31.8976673],[117.3050902,31.9055332],[117.3072256,31.8538583],[117.3115766,31.8541666],[117.3143202,31.8559951]],"engineers":[{"id":4874430,"name":"夏冰雪"}],"color":"#947807"},{"gridId":4097,"gridName":"蜀山1","gridCode":"3401000043","region":"蜀山区","points":[[117.1989753,31.8846075],[117.2194637,31.8860345],[117.2197201,31.8809942],[117.222408,31.8627929],[117.218767,31.8392103],[117.2104287,31.8385405],[117.1929537,31.8372461],[117.1652999,31.8368748],[117.1678628,31.8826915],[117.1989753,31.8846075]],"engineers":[{"id":4750825,"name":"张鲁"},{"id":4816734,"name":"王建林"}],"color":"#077894"},{"gridId":9304,"gridName":"肥西2","gridCode":"3401000060","region":"肥西县","points":[[117.1638226,31.768584],[117.1933448,31.7493041],[117.2079611,31.7599579],[117.2131103,31.7642941],[117.2400993,31.7959836],[117.1932257,31.7951025],[117.1538967,31.7950262],[117.137971,31.795166],[117.1044253,31.7958235],[117.1046109,31.789849],[117.1141173,31.7798838],[117.1638226,31.768584]],"engineers":[{"id":4565313,"name":"孙晓"},{"id":4854580,"name":"杨国超"}],"color":"#04A8D1"},{"gridId":9306,"gridName":"包河4","gridCode":"3401000062","region":"包河区","points":[[117.3170292,31.8038686],[117.3244514,31.8045498],[117.3448175,31.808929],[117.3438867,31.8183809],[117.3413154,31.8339133],[117.3428342,31.8436078],[117.3465102,31.8472179],[117.348858,31.8525325],[117.3408972,31.8547482],[117.3337549,31.8546634],[117.3179215,31.8591848],[117.3143202,31.8559951],[117.3115766,31.8541666],[117.3072256,31.8538583],[117.3093856,31.8224814],[117.3170292,31.8038686]],"engineers":[{"id":4878801,"name":"周志朋"},{"id":4849709,"name":"陈康乐"}],"color":"#56D104"},{"gridId":9308,"gridName":"包河2","gridCode":"3401000064","region":"包河区","points":[[117.4058326,31.8397635],[117.3888021,31.8216037],[117.3862484,31.8135451],[117.3709856,31.8098952],[117.3448175,31.808929],[117.3438867,31.8183809],[117.3413154,31.8339133],[117.3428342,31.8436078],[117.3465102,31.8472179],[117.348858,31.8525325],[117.3581956,31.8489965],[117.3800089,31.8432668],[117.4058326,31.8397635]],"engineers":[{"id":4838908,"name":"沈加坡"}],"color":"#2500B8"},{"gridId":9321,"gridName":"包河1","gridCode":"3401000077","region":"包河区","points":[[117.4058326,31.8397635],[117.4038933,31.8749747],[117.4053699,31.8977131],[117.396686,31.897997],[117.3783245,31.8947503],[117.3696741,31.8912846],[117.365715,31.8912719],[117.3549374,31.8912374],[117.354219,31.8666493],[117.3517691,31.8614021],[117.348858,31.8525325],[117.3800089,31.8432668],[117.3928296,31.8417867],[117.4058326,31.8397635]],"engineers":[{"id":4597951,"name":"徐勇"},{"id":4838908,"name":"沈加坡"}],"color":"#E64585"},{"gridId":9324,"gridName":"肥东3","gridCode":"3401000080","region":"肥东县","points":[[117.3862484,31.8135451],[117.3867891,31.8103079],[117.3905878,31.8090464],[117.3983962,31.8082353],[117.4018173,31.803452],[117.4283458,31.7881422],[117.4793986,31.7862125],[117.4981727,31.8303771],[117.4987946,31.8430652],[117.5101142,31.8512952],[117.5100124,31.8600995],[117.5107764,31.8638605],[117.5161849,31.8704614],[117.507173,31.8816121],[117.455598,31.857645],[117.4278719,31.8367263],[117.4077389,31.8221198],[117.3862484,31.8135451]],"engineers":[{"id":4846844,"name":"张健"},{"id":4586838,"name":"王元"}],"color":"#075C94"},{"gridId":9330,"gridName":"肥西1","gridCode":"3401000086","region":"肥西县","points":[[117.2472318,31.7955837],[117.2400993,31.7959836],[117.2131103,31.7642941],[117.2079611,31.7599579],[117.1933448,31.7493041],[117.2127556,31.7319452],[117.2377662,31.7317253],[117.2468571,31.7471868],[117.2472318,31.7955837]],"engineers":[{"id":4811407,"name":"孙凯程"},{"id":4565313,"name":"孙晓"},{"id":4854580,"name":"杨国超"}],"color":"#D104D1"},{"gridId":10271,"gridName":"蜀山2","gridCode":"3401000092","region":"蜀山区","points":[[117.1932257,31.7951025],[117.1660105,31.7951321],[117.1652999,31.8368748],[117.1929537,31.8372461],[117.2104287,31.8385405],[117.218767,31.8392103],[117.2187242,31.8324369],[117.2169528,31.8269894],[117.206223,31.811428],[117.197237,31.8014327],[117.1932257,31.7951025]],"engineers":[{"id":4691579,"name":"倪家猛"},{"id":4565313,"name":"孙晓"},{"id":4880349,"name":"邓中良"}],"color":"#D12D04"},{"gridId":10350,"gridName":"包河8","gridCode":"3401000093","region":"包河区","points":[[117.2187242,31.8324369],[117.218767,31.8392103],[117.222408,31.8627929],[117.2372173,31.8587729],[117.2480558,31.8573448],[117.2573411,31.8591419],[117.272794,31.856825],[117.2699325,31.8215909],[117.2616507,31.8229572],[117.2530472,31.8231615],[117.2344405,31.822431],[117.2169528,31.8269894],[117.2187242,31.8324369]],"engineers":[{"id":4691579,"name":"倪家猛"},{"id":4791426,"name":"王斌"}],"color":"#7F04D1"},{"gridId":10467,"gridName":"蜀山4","gridCode":"3401000095","region":"蜀山区","points":[[117.0814212,31.8352584],[117.1376463,31.8364975],[117.1652999,31.8368748],[117.1660105,31.7951321],[117.137971,31.795166],[117.1044253,31.7958235],[117.0749903,31.8091493],[117.0790515,31.8173243],[117.0814212,31.8352584]],"engineers":[{"id":4815903,"name":"王晓东"},{"id":4880349,"name":"邓中良"}],"color":"#0404D1"},{"gridId":10468,"gridName":"蜀山5","gridCode":"3401000096","region":"蜀山区","points":[[117.0790515,31.8173243],[117.0865077,31.8737531],[117.011342,31.8948037],[116.99526,31.8194532],[117.0790515,31.8173243]],"engineers":[{"id":4815903,"name":"王晓东"}],"color":"#D10404"},{"gridId":10469,"gridName":"肥东2","gridCode":"3401000097","region":"瑶海区","points":[[117.4053699,31.8977131],[117.4258588,31.8971901],[117.4330777,31.9212446],[117.4565133,31.9211124],[117.456045,31.8903172],[117.4656195,31.8631686],[117.4548743,31.8577491],[117.4281746,31.8372105],[117.4073201,31.8224535],[117.3862484,31.8135451],[117.3888021,31.8216037],[117.4058326,31.8397635],[117.4038933,31.8749747],[117.4053699,31.8977131]],"engineers":[{"id":4846844,"name":"张健"},{"id":4597951,"name":"徐勇"},{"id":4586838,"name":"王元"}],"color":"#7FD104"},{"gridId":10470,"gridName":"北城1","gridCode":"3401000098","region":"庐阳区","points":[[117.2523437,31.9494812],[117.2620007,31.9551649],[117.2769443,31.9577253],[117.2912018,31.9592],[117.3059063,31.9616091],[117.3080853,31.957672],[117.3081317,31.9543181],[117.3056143,31.9508664],[117.3052849,31.9463932],[117.3044986,31.9452205],[117.3004721,31.9389728],[117.3038932,31.9370952],[117.3030487,31.9332802],[117.3036358,31.9315529],[117.3035005,31.9294382],[117.3054992,31.9270415],[117.3056649,31.9255334],[117.3058448,31.9241961],[117.3038161,31.9225683],[117.3031549,31.9212481],[117.3009008,31.9150698],[117.3027668,31.9118654],[117.3050539,31.9099806],[117.3046006,31.9084092],[117.3051394,31.9064395],[117.3052703,31.9060034],[117.3046758,31.9058339],[117.3046758,31.9058339],[117.3009778,31.9060947],[117.297488,31.9050899],[117.2785493,31.9031298],[117.2648551,31.9057673],[117.2545739,31.9038791],[117.2180774,31.8972933],[117.2076566,31.9354056],[117.2117289,31.9441318],[117.2523437,31.9494812]],"engineers":[{"id":4841443,"name":"谢涛涛"}],"color":"#5604D1"},{"gridId":10471,"gridName":"包河7","gridCode":"3401000099","region":"包河区","points":[[117.2197201,31.8809942],[117.2194637,31.8860345],[117.2180774,31.8972933],[117.2545739,31.9038791],[117.2648551,31.9057673],[117.2744134,31.9039263],[117.272794,31.856825],[117.2573411,31.8591419],[117.2480558,31.8573448],[117.2372173,31.8587729],[117.2231802,31.8626305],[117.2197201,31.8809942]],"engineers":[{"id":4834926,"name":"张永杰"},{"id":4750825,"name":"张鲁"},{"id":4816734,"name":"王建林"}],"color":"#D1D104"},{"gridId":10472,"gridName":"肥西5","gridCode":"3401000100","region":"肥西县","points":[[117.1013164,31.7422604],[117.1066198,31.6967793],[117.1209346,31.6884765],[117.1384318,31.684823],[117.1825378,31.6849616],[117.1832663,31.7258737],[117.17345,31.7337975],[117.1674965,31.7279086],[117.1566311,31.7407128],[117.1013164,31.7422604]],"engineers":[{"id":4874314,"name":"马理想"}],"color":"#2D04D1"},{"gridId":10473,"gridName":"肥西4","gridCode":"3401000101","region":"肥西县","points":[[117.0843598,31.7588607],[117.0837013,31.7867085],[117.1046109,31.789849],[117.1141173,31.7798838],[117.1638226,31.768584],[117.1933448,31.7493041],[117.17345,31.7337975],[117.1674965,31.7279086],[117.1566311,31.7407128],[117.1013164,31.7422604],[117.0866722,31.7457207],[117.0843598,31.7588607]],"engineers":[{"id":4874314,"name":"马理想"}],"color":"#2DD104"},{"gridId":10653,"gridName":"滨湖4","gridCode":"3401000102","region":"肥西县","points":[[117.2757919,31.7303101],[117.2540464,31.708659],[117.2458814,31.6959793],[117.2437967,31.6853155],[117.3062584,31.6850455],[117.3155918,31.6996923],[117.3266619,31.7112919],[117.3480086,31.7206241],[117.3750429,31.7256514],[117.3448118,31.7303103],[117.2757919,31.7303101]],"engineers":[{"id":4577401,"name":"葛嘉"},{"id":4833906,"name":"陶伟健"}],"color":"#0000B8"},{"gridId":10654,"gridName":"瑶海2","gridCode":"3401000103","region":"瑶海区","points":[[117.3118867,32.005853],[117.312044,31.9678885],[117.3084393,31.9624787],[117.3059063,31.9616091],[117.3080853,31.957672],[117.3081317,31.9543181],[117.312724,31.9510546],[117.3805873,31.9315808],[117.4357353,31.9306509],[117.4396613,31.9373799],[117.4396391,31.9489266],[117.433648,31.9672635],[117.3523933,32.0076742],[117.3118867,32.005853]],"engineers":[{"id":4597951,"name":"徐勇"},{"id":4882695,"name":"杨浩"},{"id":4876437,"name":"齐永康"}],"color":"#D17F04"},{"gridId":10655,"gridName":"北城3","gridCode":"3401000104","region":"庐阳区","points":[[117.1867932,32.0122063],[117.1859114,31.9759827],[117.1912657,31.9846498],[117.2648557,32.0002034],[117.3118867,32.005853],[117.2980137,32.0602624],[117.2694132,32.0741272],[117.2460205,32.0720983],[117.2144907,32.0309918],[117.1867932,32.0122063]],"engineers":[{"id":4842288,"name":"付奥博"},{"id":4684786,"name":"王俊"}],"color":"#8C3569"},{"gridId":10712,"gridName":"滨湖3","gridCode":"3401000105","region":"肥西县","points":[[117.2472318,31.7955837],[117.2546993,31.7954263],[117.2647416,31.7966551],[117.2733111,31.7988627],[117.2805492,31.7999897],[117.2858288,31.800551],[117.2872395,31.7729598],[117.2875134,31.7622698],[117.2861096,31.7538189],[117.2825001,31.7469083],[117.2747191,31.7313353],[117.2476519,31.7316385],[117.2377662,31.7317253],[117.2468571,31.7471868],[117.2472318,31.7955837]],"engineers":[{"id":4811407,"name":"孙凯程"},{"id":4854580,"name":"杨国超"}],"color":"#8C6935"},{"gridId":10713,"gridName":"滨湖5","gridCode":"3401000106","region":"肥西县","points":[[117.2377662,31.7317253],[117.2757919,31.7303101],[117.2540464,31.708659],[117.2458814,31.6959793],[117.2437967,31.6853155],[117.2123047,31.685137],[117.2377662,31.7317253]],"engineers":[{"id":4811407,"name":"孙凯程"},{"id":4854580,"name":"杨国超"}],"color":"#45E6A5"},{"gridId":10714,"gridName":"肥东1","gridCode":"3401000107","region":"肥东县","points":[[117.4565133,31.9211124],[117.456045,31.8903172],[117.4656195,31.8631686],[117.507173,31.8816121],[117.4875676,31.9216667],[117.4565133,31.9211124]],"engineers":[{"id":4846844,"name":"张健"},{"id":4878915,"name":"徐中海"},{"id":4586838,"name":"王元"}],"color":"#B82500"},{"gridId":10718,"gridName":"包河9","gridCode":"3401000108","region":"包河区","points":[[117.2169528,31.8269894],[117.206223,31.811428],[117.197237,31.8014327],[117.1932257,31.7951025],[117.2400993,31.7959836],[117.2472318,31.7955837],[117.2546993,31.7954263],[117.2647416,31.7966551],[117.2699325,31.8215909],[117.2616507,31.8229572],[117.2530472,31.8231615],[117.2344405,31.822431],[117.2169528,31.8269894]],"engineers":[{"id":4691579,"name":"倪家猛"},{"id":4565313,"name":"孙晓"},{"id":4791426,"name":"王斌"}],"color":"#A8D104"},{"gridId":10719,"gridName":"包河6","gridCode":"3401000109","region":"包河区","points":[[117.272794,31.856825],[117.2699325,31.8215909],[117.2647416,31.7966551],[117.2733111,31.7988627],[117.2805492,31.7999897],[117.2858288,31.800551],[117.3170292,31.8038686],[117.3093856,31.8224814],[117.3072256,31.8538583],[117.2795912,31.8531061],[117.272794,31.856825]],"engineers":[{"id":4878801,"name":"周志朋"},{"id":4849709,"name":"陈康乐"}],"color":"#047FD1"},{"gridId":10720,"gridName":"包河5","gridCode":"3401000110","region":"包河区","points":[[117.2744134,31.9039263],[117.272794,31.856825],[117.2795912,31.8531061],[117.3072256,31.8538583],[117.3050902,31.9055332],[117.3009778,31.9060947],[117.297488,31.9050899],[117.2785493,31.9031298],[117.2744134,31.9039263]],"engineers":[{"id":4834926,"name":"张永杰"},{"id":4733535,"name":"李磊"}],"color":"#D1042D"}],"engineerColors":{"4811407":"#56D104","4854580":"#E64545","4842288":"#D12D04","4684786":"#0049B8","4841443":"#04D12D","4815903":"#0000B8","4877234":"#7F04D1","4577401":"#D1D104","4833906":"#04D104","4597951":"#D10404","4882695":"#D104D1","4723629":"#8C7B35","4874430":"#E645A5","4750825":"#45E645","4816734":"#00B8B8","4565313":"#0404D1","4878801":"#2500B8","4849709":"#358C35","4838908":"#042DD1","4846844":"#45E665","4586838":"#2D04D1","4691579":"#2DD104","4880349":"#B80000","4791426":"#940707","4834926":"#8C3558","4874314":"#D17F04","4876437":"#04D1A8","4878915":"#D1042D","4733535":"#65E645"},"engineerNames":{"4811407":"孙凯程","4854580":"杨国超","4842288":"付奥博","4684786":"王俊","4841443":"谢涛涛","4815903":"王晓东","4877234":"石国红","4577401":"葛嘉","4833906":"陶伟健","4597951":"徐勇","4882695":"杨浩","4723629":"谢彪","4874430":"夏冰雪","4750825":"张鲁","4816734":"王建林","4565313":"孙晓","4878801":"周志朋","4849709":"陈康乐","4838908":"沈加坡","4846844":"张健","4586838":"王元","4691579":"倪家猛","4880349":"邓中良","4791426":"王斌","4834926":"张永杰","4874314":"马理想","4876437":"齐永康","4878915":"徐中海","4733535":"李磊"},"stats":{"gridCount":32,"engineerCount":29,"bindingCount":65},"excludedStopCount":1,"excludedStopNote":"已剔除停止接单状态工程师（依据天工系统接单状态字段）"};
+
+const CONFIG = { ak: 'LfLJ4JXNcvMyr5kudePLqVwVe2GVuvtC', city: '合肥市', center: [117.25, 31.86] };
+const QS = new URLSearchParams(location.search);
+const IS_POSTER = (QS.get('mode') === 'poster');
+
+const GRIDS = GRID_DATA.grids.map(g => ({ ...g, engs: g.engineers || [] }));
+const BY_ID = {}; GRIDS.forEach(g => BY_ID[g.gridId] = g);
+const ENG_COLOR = GRID_DATA.engineerColors || {};
+const ENG_NAMES = GRID_DATA.engineerNames || {};
+const REGION_ORDER = GRID_DATA.regionOrder || [];
+
+/* 名称前缀配色：网格标签“名称行”色块与卡片边框按网格名称前缀（去掉尾部数字的词根）着色，
+   同前缀同色 / 异前缀异色；不再使用行政区字段。实际词根 7 组：包河 / 瑶海 / 肥东 / 北城 / 蜀山 / 肥西 / 滨湖。
+   色板在 8bit sRGB 空间按 7 段色相环优化，并经 CIELAB ΔE00 最大化拉开
+   （任意两色 ΔE00 ≥ 30.8，最大 89.0），白字对比度 4.57:1 ~ 14.90:1（全部 ≥ 4.5:1），
+   与网格蒙版 #3333FF 的 ΔE00 ≥ 20.5。 */
+const PREFIX_COLOR = {
+  '包河': '#C91904',   /* 朱红 */
+  '瑶海': '#5C4600',   /* 暗橄榄 */
+  '肥东': '#0A8904',   /* 绿 */
+  '北城': '#035453',   /* 墨青 */
+  '蜀山': '#0073D6',   /* 蓝 */
+  '肥西': '#30175E',   /* 深紫 */
+  '滨湖': '#D600A3'    /* 品红 */
+};
+const PREFIX_FALLBACK_COLOR = '#37474F';
+/* 名称前缀：去掉名称尾部数字（肥西1/肥西2 → 肥西；滨湖1..5 → 滨湖） */
+function gridPrefix(name) { return String(name || '').replace(/\d+$/, ''); }
+function prefixColor(g) { return PREFIX_COLOR[gridPrefix(g && g.gridName)] || PREFIX_FALLBACK_COLOR; }
+const BIND_COUNT = GRIDS.reduce((a, g) => a + g.engs.length, 0);
+const ENG_COUNT = Object.keys(ENG_COLOR).length;
+const STOP_CNT = GRID_DATA.excludedStopCount || 0;
+const DATA_DATE = GRID_DATA.dataDate || '—';
+
+/* 网格配色（浅色映射，用于面填充；描边/标题用本色） */
+function tint(hex, k) {
+  const n = parseInt(hex.slice(1), 16);
+  const r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
+  const m = v => Math.max(0, Math.min(255, Math.round(v + (255 - v) * k)));
+  return 'rgb(' + m(r) + ',' + m(g) + ',' + m(b) + ')';
+}
+
+/* 底图样式：使用百度地图默认样式（含路网 / 道路名 / 地名 / POI 标注），
+   不套用自定义浅色样式——自定义样式会把道路刷白并关闭道路文字，导致“看不见路”。 */
+
+/* ------------------------ 网格蒙版配色（原天工系统真实配色） ------------------------ */
+/* 常态：填充 #3333FF / 透明度 0.25；边界线 #0000FF / 4px / 实线 / 透明度 0.85 */
+const FILL_COLOR = '#3333FF';
+const FILL_OPACITY = 0.25;
+const STROKE_COLOR = '#0000FF';
+const STROKE_WEIGHT = 4;
+const STROKE_OPACITY = 0.85;
+const STROKE_STYLE = 'solid';
+/* 选中态（仅交互页；海报模式永不出现）：填充 #FFFFFF / 0.85；描边 #FF0000 / 4px / 虚线 */
+const SEL_FILL_COLOR = '#FFFFFF';
+const SEL_FILL_OPACITY = 0.85;
+const SEL_STROKE_COLOR = '#FF0000';
+const SEL_STROKE_WEIGHT = 4;
+const SEL_STROKE_OPACITY = 1;
+const SEL_STROKE_STYLE = 'dashed';
+/* 搜索命中 / 非命中淡出（沿用同一色系，只调透明度与线宽） */
+const HIT_FILL_OPACITY = 0.5;
+const DIM_FILL_OPACITY = 0.06;
+const DIM_STROKE_OPACITY = 0.25;
+
+/* ------------------------------ 几何工具 ------------------------------ */
+function pip(pt, poly) {
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const xi = poly[i][0], yi = poly[i][1], xj = poly[j][0], yj = poly[j][1];
+    if (((yi > pt[1]) !== (yj > pt[1])) && (pt[0] < (xj - xi) * (pt[1] - yi) / (yj - yi) + xi)) inside = !inside;
+  }
+  return inside;
+}
+function segDist(p, a, b) {
+  const vx = b[0] - a[0], vy = b[1] - a[1], wx = p[0] - a[0], wy = p[1] - a[1];
+  const L = vx * vx + vy * vy;
+  let t = L ? (wx * vx + wy * vy) / L : 0;
+  t = Math.max(0, Math.min(1, t));
+  return Math.hypot(p[0] - (a[0] + t * vx), p[1] - (a[1] + t * vy));
+}
+function boundaryDist(p, poly) {
+  let d = Infinity;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) d = Math.min(d, segDist(p, poly[j], poly[i]));
+  return d;
+}
+/* ------------------------------ 地图与覆盖物 ------------------------------ */
+/* 标签实现：离屏量取尺寸 + 百度原生 Label 承载（按经纬度锚定，随地图内核同步平移/缩放） */
+let map = null, labelLayer = null, labelItems = [], labelBaseFont = 0, anchorsReady = false;
+let labelSig = '', lastZoomLevel = -1, layoutTimer = null, measureHost = null;
+let showEngNames = true, activeGridId = null, hitSet = null, hitPoint = null, lastGridClickAt = 0;
+
+/* 网格面/边状态：常态 / 选中（仅交互页）/ 搜索命中 / 非命中淡出；海报模式恒为常态 */
+function gridStyleFor(g) {
+  const sel = !IS_POSTER && activeGridId === g.gridId;
+  const hit = !IS_POSTER && hitSet ? hitSet.has(g.gridId) : false;
+  const dim = !IS_POSTER && hitSet && !hit && !sel;
+  if (sel) {
+    return { fill: SEL_FILL_COLOR, fillOp: SEL_FILL_OPACITY, stroke: SEL_STROKE_COLOR,
+             sw: SEL_STROKE_WEIGHT, strokeOp: SEL_STROKE_OPACITY, dash: SEL_STROKE_STYLE, z: 70 };
+  }
+  if (dim) {
+    return { fill: FILL_COLOR, fillOp: DIM_FILL_OPACITY, stroke: STROKE_COLOR,
+             sw: 1, strokeOp: DIM_STROKE_OPACITY, dash: 'solid', z: 10 };
+  }
+  return { fill: FILL_COLOR, fillOp: hit ? HIT_FILL_OPACITY : FILL_OPACITY, stroke: STROKE_COLOR,
+           sw: STROKE_WEIGHT, strokeOp: hit ? 1 : STROKE_OPACITY, dash: STROKE_STYLE, z: hit ? 60 : 20 };
+}
+
+/* 应用样式；个别内核版本不支持动态改线型，此时重建该网格多边形以应用虚线 */
+function applyGridStyle(g, st) {
+  let o = g._ov;
+  if (!o) return;
+  if (st.dash !== o._dash && typeof o.setStrokeStyle !== 'function') {
+    map.removeOverlay(o);
+    o = createPoly(g, st);
+    map.addOverlay(o);
+    g._ov = o;
+    return;
+  }
+  o.setFillColor(st.fill); o.setFillOpacity(st.fillOp);
+  o.setStrokeColor(st.stroke); o.setStrokeWeight(st.sw); o.setStrokeOpacity(st.strokeOp);
+  if (typeof o.setStrokeStyle === 'function') { try { o.setStrokeStyle(st.dash); } catch (e) { } }
+  if (typeof o.setZIndex === 'function') o.setZIndex(st.z);
+  o._dash = st.dash;
+}
+
+function mapStyles() {
+  GRIDS.forEach(g => applyGridStyle(g, gridStyleFor(g)));
+}
+
+function createPoly(g, st) {
+  const pts = g.points.map(p => new BMap.Point(p[0], p[1]));
+  const poly = new BMap.Polygon(pts, {
+    strokeColor: st.stroke, strokeWeight: st.sw, strokeOpacity: st.strokeOp, strokeStyle: st.dash,
+    fillColor: st.fill, fillOpacity: st.fillOp
+  });
+  poly._dash = st.dash;
+  /* 点击网格：选中 / 再次点击取消选中；海报模式不响应，确保出图不出现选中态 */
+  poly.addEventListener('click', function () {
+    if (IS_POSTER) return;
+    lastGridClickAt = Date.now();
+    toggleSelect(g);
+  });
+  poly.addEventListener('mouseover', function (e) { if (!IS_POSTER) showTip(e, g); });
+  poly.addEventListener('mouseout', function () { hideTip(); });
+  return poly;
+}
+
+function drawGrids() {
+  GRIDS.forEach(g => {
+    const poly = createPoly(g, gridStyleFor(g));
+    map.addOverlay(poly);
+    g._ov = poly;
+  });
+}
+
+/* ------------------------------ 标签排版（性能优化版） ------------------------------ */
+/* 目标：网格名 + 工程师姓名合并为一个标签块，整块尽量落在本网格内部；不同网格标签互不重叠。
+   性能设计（“缩放卡死”的根因修复）：
+     ① 标签锚点只取决于网格形状、与缩放级别无关 —— 启动时在“平面米坐标”里一次性求出
+        “离边界最远”的点（最大内切圆圆心）及该点到边界的最短距离；之后任何缩放级别都不再重算锚点。
+        旧实现每次缩放都在像素空间做网格搜索，候选点数随缩放级别呈平方级膨胀，高缩放级别下单次
+        排布要跑上千万次运算，主线程被占满 → 滚轮缩放时页面卡死。
+     ② 缩放时只做 O(1) 判断：把标签像素尺寸换算成米后与网格内切半径比较，据此在
+        “完整块 → 仅网格名（3 档字号）”之间选档；档位未变则零 DOM 操作。
+     ③ 标签用 BMap.Label 按经纬度锚定，位置由地图内核维护，缩放/拖动全程自动跟随，无需重挂。 */
+
+const MPER_DEG = 111320;              /* 每度纬度约 111320 米 */
+const RES_M_PER_PX = 262144;    /* 百度地图级差常数：0 级赤道分辨率 2^18 米/像素（实测 z=11/lat31.9 ≈108.7 m/px） */
+
+function ensureMeasureHost() {
+  if (measureHost && measureHost.parentNode) return measureHost;
+  measureHost = document.createElement('div');
+  measureHost.style.cssText = 'position:fixed;left:-99999px;top:-99999px;width:0;height:0;' +
+    'overflow:hidden;visibility:hidden;pointer-events:none;';
+  document.body.appendChild(measureHost);
+  return measureHost;
+}
+
+/* 经纬度 → 以网格中心纬度为准的等距平面（米）：网格尺度内保角，长度比例与缩放级别无关 */
+function buildPlane(g) {
+  let s = 0;
+  g.points.forEach(p => { s += p[1]; });
+  const lat0 = s / g.points.length;
+  g._lat0 = lat0;
+  g._kx = MPER_DEG * Math.cos(lat0 * Math.PI / 180);
+  g._ky = MPER_DEG;
+  g._plane = g.points.map(p => [p[0] * g._kx, p[1] * g._ky]);
+}
+
+/* 多边形“最大内切圆圆心”（离边界最远的点）：步长按网格自身尺度自适应 → 候选点约 48×48 个，
+   与缩放级别无关，只在启动时计算一次 */
+function poleOfInaccessibility(poly) {
+  let minx = Infinity, maxx = -Infinity, miny = Infinity, maxy = -Infinity;
+  poly.forEach(p => {
+    if (p[0] < minx) minx = p[0];
+    if (p[0] > maxx) maxx = p[0];
+    if (p[1] < miny) miny = p[1];
+    if (p[1] > maxy) maxy = p[1];
+  });
+  const spanX = maxx - minx, spanY = maxy - miny;
+  const coarse = Math.max(Math.max(spanX, spanY) / 48, 1e-6);
+  let best = null, bestD = -Infinity;
+  for (let y = miny; y <= maxy; y += coarse) {
+    for (let x = minx; x <= maxx; x += coarse) {
+      if (!pip([x, y], poly)) continue;
+      const d = boundaryDist([x, y], poly);
+      if (d > bestD) { bestD = d; best = [x, y]; }
+    }
+  }
+  if (!best) {   /* 退化网格：退回包围盒中心 */
+    const c = [(minx + maxx) / 2, (miny + maxy) / 2];
+    return { p: c, d: boundaryDist(c, poly) };
+  }
+  /* 精修两轮：在粗解附近按 1/8 → 1/24 步长收敛，提升锚点居中质量 */
+  let step = coarse / 8;
+  for (let k = 0; k < 2; k++) {
+    const cx = best[0], cy = best[1];
+    for (let dy = -1; dy <= 1; dy++) {
+      for (let dx = -1; dx <= 1; dx++) {
+        const x = cx + dx * step, y = cy + dy * step;
+        if (!pip([x, y], poly)) continue;
+        const d = boundaryDist([x, y], poly);
+        if (d > bestD) { bestD = d; best = [x, y]; }
+      }
+    }
+    step /= 3;
+  }
+  return { p: best, d: bestD };
+}
+
+/* 标签块 DOM：还原旧版外观（白底卡片 + 同色边框 + 名称行色块白字 + 深色姓名行 + 工程师专属色点）；
+   其中名称行色块与边框颜色改由“网格名称前缀”决定（prefixColor），不再取网格自身配色 */
+function buildLabelEl(g, fs, nameOnly) {
+  const el = document.createElement('div');
+  el.className = 'gl' + (nameOnly ? ' gl-min' : '');
+  el.style.setProperty('--c', prefixColor(g));
+  const h = document.createElement('div');
+  h.className = 'gl-h';
+  h.style.background = prefixColor(g);
+  h.style.fontSize = fs + 'px';
+  h.textContent = g.gridName;
+  el.appendChild(h);
+  if (showEngNames && !nameOnly) {
+    const b = document.createElement('div');
+    b.className = 'gl-b';
+    g.engs.forEach(e => {
+      const r = document.createElement('div');
+      r.className = 'gl-e';
+      r.style.fontSize = Math.max(9, fs - 2) + 'px';
+      const i = document.createElement('i');
+      i.style.background = ENG_COLOR[e.id] || '#64748b';
+      const sp = document.createElement('span');
+      sp.textContent = e.name;
+      r.appendChild(i); r.appendChild(sp);
+      b.appendChild(r);
+    });
+    el.appendChild(b);
+  }
+  return el;
+}
+
+/* 变体阶梯：0=完整块（网格名 + 全部姓名）；1..3=仅网格名，字号逐级缩小 */
+function variantSpecs(baseFs) {
+  return [
+    { nameOnly: false, fs: baseFs },
+    { nameOnly: true, fs: baseFs },
+    { nameOnly: true, fs: Math.max(8, baseFs - 2) },
+    { nameOnly: true, fs: Math.max(7, baseFs - 4) }
+  ];
+}
+
+/* 预计算（仅启动 / 窗口尺寸变化 / 姓名开关切换时执行，缩放级别变化不触发）：
+   网格锚点与内切半径、各变体的标签像素尺寸与 HTML */
+function prepareLabels() {
+  labelBaseFont = IS_POSTER ? 20 : Math.max(11, Math.min(16, Math.round(window.innerWidth / 200)));
+  ensureMeasureHost();
+  labelItems.forEach(it => { if (it.label) { try { map.removeOverlay(it.label); } catch (e) { } } });
+  const specs = variantSpecs(labelBaseFont);
+  const pending = [];
+  GRIDS.forEach(g => {
+    if (!g._plane) buildPlane(g);
+    if (!g._pole) {
+      const r = poleOfInaccessibility(g._plane);
+      g._pole = r.p; g._poleD = r.d;
+      g._polePt = new BMap.Point(g._pole[0] / g._kx, g._pole[1] / g._ky);
+    }
+    g._searchCache = {};
+    g._variants = [];
+    specs.forEach((sp, vi) => {
+      const el = buildLabelEl(g, sp.fs, sp.nameOnly);
+      measureHost.appendChild(el);
+      pending.push({ g: g, vi: vi, sp: sp, el: el });
+    });
+  });
+  /* 一次性读取全部尺寸（同批布局，避免逐个强制回流） */
+  pending.forEach(item => {
+    item.g._variants[item.vi] = {
+      nameOnly: item.sp.nameOnly, fs: item.sp.fs,
+      W: item.el.offsetWidth, H: item.el.offsetHeight,
+      html: item.el.outerHTML
+    };
+  });
+  measureHost.innerHTML = '';
+  labelItems = GRIDS.map(g => ({ g: g, label: null, pos: null, vi: -1, soft: false }));
+  anchorsReady = true;
+  labelSig = '';
+}
+
+/* 当前缩放级别下每像素代表多少米（百度地图级差：2^(18-z)，非 Web Mercator 的 156543/2^z；
+   实测 z=11/lat=31.9 时 ≈108.7 m/px，后者只有 64.9，会让“标签是否落在网格内”的判定偏松 1.67 倍） */
+function metresPerPixel(lat) {
+  return RES_M_PER_PX * Math.cos(lat * Math.PI / 180) / Math.pow(2, map.getZoom());
+}
+
+/* 标签块四角落在网格内的数量（0~4）；margin 为像素安全边距 */
+function cornersInside(g, ax, ay, W, H, mpp, margin) {
+  const poly = g._plane;
+  const rx = (W / 2 + margin) * mpp, ry = (H / 2 + margin) * mpp;
+  let n = 0;
+  if (pip([ax - rx, ay - ry], poly)) n++;
+  if (pip([ax + rx, ay - ry], poly)) n++;
+  if (pip([ax + rx, ay + ry], poly)) n++;
+  if (pip([ax - rx, ay + ry], poly)) n++;
+  return n;
+}
+
+/* 严格判定：以 (ax,ay) 为中心、W×H 像素的标签块四角是否都落在网格内（+3px 安全边距） */
+function rectFitsAt(g, ax, ay, W, H, mpp) {
+  return cornersInside(g, ax, ay, W, H, mpp, 3) === 4;
+}
+
+/* 网格内已放置标签的平面 AABB 命中的判定（消叠用，O(n) 比较，不做像素网格搜索） */
+function aabbHit(boxes, cx, cy, hw, hh, pad) {
+  for (let i = 0; i < boxes.length; i++) {
+    const b = boxes[i];
+    if (Math.abs(b.cx - cx) < b.hw + hw + pad && Math.abs(b.cy - cy) < b.hh + hh + pad) return true;
+  }
+  return false;
+}
+
+/* 兜底：锚点处放不下时，在网格内部做一次小规模（≤12×12）位置搜索；
+   minCorners=4 走严格判定，=3 允许一角越界；结果按“变体+缩放级别+档位”缓存 */
+function searchAnchor(g, vi, mpp, minCorners) {
+  const key = vi + '@' + map.getZoom() + '/' + minCorners;
+  if (key in g._searchCache) return g._searchCache[key];
+  const spec = g._variants[vi], poly = g._plane;
+  let minx = Infinity, maxx = -Infinity, miny = Infinity, maxy = -Infinity;
+  poly.forEach(p => {
+    if (p[0] < minx) minx = p[0];
+    if (p[0] > maxx) maxx = p[0];
+    if (p[1] < miny) miny = p[1];
+    if (p[1] > maxy) maxy = p[1];
+  });
+  const st = Math.max(Math.max(maxx - minx, maxy - miny) / 12, 1e-6);
+  let best = null, bestD = -Infinity;
+  for (let y = miny; y <= maxy; y += st) {
+    for (let x = minx; x <= maxx; x += st) {
+      const okPos = minCorners === 4 ? rectFitsAt(g, x, y, spec.W, spec.H, mpp)
+        : cornersInside(g, x, y, spec.W, spec.H, mpp, 0) >= minCorners;
+      if (!okPos) continue;
+      const d = boundaryDist([x, y], poly);
+      if (d > bestD) { bestD = d; best = [x, y]; }
+    }
+  }
+  const out = best ? new BMap.Point(best[0] / g._kx, best[1] / g._ky) : null;
+  g._searchCache[key] = out;
+  return out;
+}
+
+/* 选档（严格档）：从 fromVi 档起挑能整块落在本网格内的最大变体；锚点放不下就在网格内小规模搜索 */
+function chooseStrict(g, mpp, fromVi) {
+  const vs = g._variants;
+  for (let i = fromVi || 0; i < vs.length; i++) {
+    if (!vs[i]) continue;
+    if (rectFitsAt(g, g._pole[0], g._pole[1], vs[i].W, vs[i].H, mpp)) {
+      return { vi: i, pos: g._polePt, soft: false };
+    }
+    const alt = searchAnchor(g, i, mpp, 4);
+    if (alt) return { vi: i, pos: alt, soft: false };
+  }
+  return null;
+}
+
+/* 选档（宽松档）：网格太小放不下时，仍保留尽量大的变体（允许最多一角越界，至少 3/4 角在网格内），
+   但必须在已放置标签的 AABB 之外，杜绝相邻网格标签互叠；都找不到才降档 */
+function chooseRelaxed(g, mpp, boxes, pad, fromVi) {
+  const vs = g._variants;
+  for (let i = fromVi || 0; i < vs.length; i++) {
+    const sp = vs[i];
+    if (!sp) continue;
+    const sx = (sp.W / 4) * mpp, sy = (sp.H / 4) * mpp;   /* 内切圆心四周半步精细搜索（含斜向） */
+    const cands = [[g._pole[0], g._pole[1]]];
+    for (let k = 1; k <= 4; k++) {
+      cands.push([g._pole[0] + k * sx, g._pole[1]], [g._pole[0] - k * sx, g._pole[1]],
+        [g._pole[0], g._pole[1] + k * sy], [g._pole[0], g._pole[1] - k * sy],
+        [g._pole[0] + k * sx, g._pole[1] + k * sy], [g._pole[0] - k * sx, g._pole[1] - k * sy],
+        [g._pole[0] + k * sx, g._pole[1] - k * sy], [g._pole[0] - k * sx, g._pole[1] + k * sy]);
+    }
+    for (let pi = 0, pads = pad > 0 ? [pad, 0] : [0]; pi < pads.length; pi++) {
+      let best = null, bestD = -Infinity;
+      for (let c = 0; c < cands.length; c++) {
+        const x = cands[c][0], y = cands[c][1];
+        if (cornersInside(g, x, y, sp.W, sp.H, mpp, 0) < 3) continue;             /* 至少 3/4 角落在网格内 */
+        if (aabbHit(boxes, x, y, sp.W / 2 * mpp, sp.H / 2 * mpp, pads[pi])) continue;  /* 不与已放置标签重叠 */
+        const d = boundaryDist([x, y], g._plane);
+        if (d > bestD) { bestD = d; best = [x, y]; }
+      }
+      if (best) return { vi: i, pos: new BMap.Point(best[0] / g._kx, best[1] / g._ky), soft: true };
+    }
+  }
+  return null;
+}
+
+function layoutLabels(force) {
+  if (!anchorsReady || !GRIDS.length) return;
+  hideTip();
+  const mpp = metresPerPixel(GRIDS[0]._lat0);
+  const pad = 2 * mpp;                             /* 相邻标签之间至少留 2px 间隙 */
+  const boxes = [];                                /* 已放置标签的平面 AABB，用于消叠 */
+  const commit = function (it, vi, pos, soft) {
+    const sp = it.g._variants[vi];
+    if (!sp) return;
+    it.vi = vi; it.pos = pos; it.soft = soft;
+    boxes.push({ cx: pos.lng * it.g._kx, cy: pos.lat * it.g._ky, hw: sp.W / 2 * mpp, hh: sp.H / 2 * mpp });
+  };
+  /* 第一轮：完整块（含姓名）整块落网格（锚点优先，其次网格内搜索） */
+  labelItems.forEach(it => {
+    it.vi = -1; it.pos = null; it.soft = false; it.hidden = false;
+    const r = chooseStrict(it.g, mpp, 0);
+    if (r) commit(it, r.vi, r.pos, false);
+  });
+  /* 第二轮：完整块放不下时，允许最多一角越界做消叠放置——优先保住“姓名可见” */
+  labelItems.forEach(it => {
+    if (it.vi >= 0) return;
+    const r = chooseRelaxed(it.g, mpp, boxes, pad, 0);
+    if (r) commit(it, r.vi, r.pos, true);
+  });
+  /* 第三轮：整块都放不下 → 降档为“仅网格名”，先严格后宽松 */
+  labelItems.forEach(it => {
+    if (it.vi >= 0) return;
+    const r = chooseStrict(it.g, mpp, 1);
+    if (r) commit(it, r.vi, r.pos, false);
+  });
+  labelItems.forEach(it => {
+    if (it.vi >= 0) return;
+    const r = chooseRelaxed(it.g, mpp, boxes, pad, 1);
+    if (r) commit(it, r.vi, r.pos, true);
+  });
+  /* 第四轮：仍无解 → 内切圆心 + 最小变体；若与已放置标签相撞，则在本缩放级隐藏它
+     （低缩放级整城只有几十像素、任何标签都放不下时，避免标签糊成一团，缩放回来后自动恢复） */
+  labelItems.forEach(it => {
+    if (it.vi >= 0) return;
+    const g = it.g, vi = g._variants.length - 1, sp = g._variants[vi];
+    if (!sp) { it.vi = vi; it.pos = g._polePt; it.soft = true; it.hidden = true; return; }
+    const hw = sp.W / 2 * mpp, hh = sp.H / 2 * mpp;
+    const sx = (sp.W / 4) * mpp, sy = (sp.H / 4) * mpp;   /* 先在内切圆心附近找“不撞邻居”的空位（最多让位 3/4 个块宽） */
+    const cands = [[g._pole[0], g._pole[1]]];
+    for (let k = 1; k <= 3; k++) {
+      cands.push([g._pole[0] + k * sx, g._pole[1]], [g._pole[0] - k * sx, g._pole[1]],
+        [g._pole[0], g._pole[1] + k * sy], [g._pole[0], g._pole[1] - k * sy],
+        [g._pole[0] + k * sx, g._pole[1] + k * sy], [g._pole[0] - k * sx, g._pole[1] - k * sy],
+        [g._pole[0] + k * sx, g._pole[1] - k * sy], [g._pole[0] - k * sx, g._pole[1] + k * sy]);
+    }
+    let slot = null;
+    for (let c = 0; c < cands.length && !slot; c++) {
+      if (!aabbHit(boxes, cands[c][0], cands[c][1], hw, hh, 0)) slot = cands[c];
+    }
+    if (slot) {
+      commit(it, vi, new BMap.Point(slot[0] / g._kx, slot[1] / g._ky), true);
+    } else {                                                     /* 实在无处可放：本档位隐藏，避免标签糊成一团 */
+      it.vi = vi; it.pos = g._polePt; it.soft = true; it.hidden = true;
+    }
+  });
+  const sig = labelItems.map(it => it.g.gridId + ':' + it.vi + (it.soft ? 's' : '') + (it.hidden ? 'h' : ''));
+  const nextSig = labelBaseFont + '|' + (showEngNames ? 'n1' : 'n0') + '|' +
+    (IS_POSTER ? 'p' : 'i') + '|' + sig.join(',');
+  if (!force && nextSig === labelSig) return;
+  labelSig = nextSig;
+  labelItems.forEach(it => {
+    const spec = it.g._variants[it.vi];
+    if (!spec) return;
+    if (it.hidden) {                            /* 本级别放不下且会撞到别的标签：移除，缩放回来后自动恢复 */
+      if (it.label) { map.removeOverlay(it.label); it.label = null; }
+      return;
+    }
+    const off = new BMap.Size(-Math.round(spec.W / 2), -Math.round(spec.H / 2));
+    if (!it.label) {
+      const lbl = new BMap.Label(spec.html, { position: it.pos, offset: off, zIndex: 30 });
+      map.addOverlay(lbl);
+      it.label = lbl;
+    } else {
+      it.label.setContent(spec.html);
+      it.label.setOffset(off);
+      it.label.setPosition(it.pos);
+    }
+  });
+  lastZoomLevel = map.getZoom();
+  window.__labelDiag = {
+    zoom: lastZoomLevel, baseFont: labelBaseFont, count: labelItems.length,
+    full: labelItems.filter(it => it.vi === 0).length,
+    nameOnly: labelItems.filter(it => it.vi > 0).length,
+    soft: labelItems.filter(it => it.soft).length,
+    strict: labelItems.filter(it => !it.soft).length,
+    hidden: labelItems.filter(it => it.hidden).length
+  };
+}
+
+/* 缩放结束：只在“缩放级别真的变了”时重排（标签位置由地图内核维护，无需重挂） */
+function onZoomEnd() {
+  const z = map.getZoom();
+  if (z === lastZoomLevel && labelSig) return;
+  if (layoutTimer) clearTimeout(layoutTimer);
+  layoutTimer = setTimeout(function () { layoutTimer = null; layoutLabels(false); }, 120);
+}
+
+/* 窗口尺寸变化：字号档位随窗口宽度变化，需重新量尺寸（去抖，避免拖窗口时频繁重排） */
+function onResize() {
+  if (layoutTimer) clearTimeout(layoutTimer);
+  layoutTimer = setTimeout(function () {
+    layoutTimer = null;
+    if (!anchorsReady) return;
+    prepareLabels();
+    layoutLabels(true);
+  }, 200);
+}
+
+/* ------------------------------ 交互：提示 / 详情 ------------------------------ */
+const tip = document.getElementById('hoverTip');
+function showTip(e, g) {
+  tip.style.display = 'block';
+  tip.innerHTML = g.gridName + '（' + g.region + '）· ' + g.engs.map(x => x.name).join('、');
+  moveTip(e);
+}
+function moveTip(e) {
+  if (!e || !e.domEvent) return;
+  tip.style.left = (e.domEvent.clientX + 14) + 'px';
+  tip.style.top = (e.domEvent.clientY + 14) + 'px';
+}
+function hideTip() { tip.style.display = 'none'; }
+
+function showGrid(g, addrText) {
+  activeGridId = g.gridId;
+  mapStyles();
+  document.querySelectorAll('.cat-item').forEach(n => n.classList.toggle('sel', +n.dataset.gid === g.gridId));
+  document.getElementById('pTitle').textContent = g.gridName + ' · 网格详情';
+  document.getElementById('pName').textContent = g.gridName;
+  document.getElementById('pCode').textContent = g.gridCode || '--';
+  document.getElementById('pRegion').textContent = '合肥市 · ' + (g.region || '--');
+  document.getElementById('pCnt').textContent = g.engs.length;
+  const box = document.getElementById('pEngs'); box.innerHTML = '';
+  g.engs.forEach(e => {
+    const d = document.createElement('div'); d.className = 'p-eng';
+    const i = document.createElement('i'); i.style.background = ENG_COLOR[e.id] || '#64748b';
+    const s = document.createElement('span'); s.textContent = e.name + '（ID ' + e.id + '）';
+    d.appendChild(i); d.appendChild(s); box.appendChild(d);
+  });
+  const ad = document.getElementById('pAddr');
+  if (addrText) { ad.style.display = 'block'; ad.className = 'p-addr'; ad.textContent = '地址「' + addrText + '」位于本网格内，请由以上工程师负责。'; }
+  else { ad.style.display = 'none'; }
+  document.getElementById('panel').classList.add('on');
+}
+
+/* 取消选中：恢复常态样式（海报模式本就不会进入选中态） */
+function clearSelection() {
+  activeGridId = null;
+  mapStyles();
+  document.querySelectorAll('.cat-item').forEach(n => n.classList.remove('sel'));
+  document.getElementById('panel').classList.remove('on');
+}
+
+/* 点击网格：选中 → 再次点击取消选中；点选其他网格则直接改选 */
+function toggleSelect(g) {
+  if (!IS_POSTER && activeGridId === g.gridId) clearSelection();
+  else showGrid(g, null);
+}
+
+function focusGrid(g) {
+  const pts = g.points.map(p => new BMap.Point(p[0], p[1]));
+  map.setViewport(pts, { margins: viewMargins() });
+  if (!IS_POSTER && map.getZoom() > 15) map.setZoom(15);
+  setTimeout(() => { showGrid(g, document.getElementById('pAddr').getAttribute('data-addr')); }, 320);
+}
+
+/* ------------------------------ 地址搜索 ------------------------------ */
+/* 命中点高亮：优先圆点，叠加失败时退回默认标注（兼容不同内核/版本） */
+function addHitMarker(pt) {
+  try {
+    const c = new BMap.Circle(pt, 180, { strokeColor: '#ffffff', strokeWeight: 3, fillColor: '#d81b60', fillOpacity: 1 });
+    map.addOverlay(c);
+    return c;
+  } catch (e) { }
+  try {
+    const mk = new BMap.Marker(pt, { enableMassClear: false });
+    map.addOverlay(mk);
+    return mk;
+  } catch (e2) { }
+  return null;
+}
+
+function locateByPoint(pt, addrText) {
+  let hit = null;
+  for (let i = 0; i < GRIDS.length; i++) if (pip([pt.lng, pt.lat], GRIDS[i].points)) { hit = GRIDS[i]; break; }
+  hitSet = hit ? new Set([hit.gridId]) : new Set();
+  mapStyles();
+  if (hitPoint) { try { map.removeOverlay(hitPoint); } catch (e) {} hitPoint = null; }
+  hitPoint = addHitMarker(pt);
+  const msg = document.getElementById('addrMsg');
+  document.getElementById('pAddr').setAttribute('data-addr', addrText || '');
+  if (hit) {
+    msg.className = 'msg ok'; msg.textContent = '已定位：' + addrText + ' → 所属网格「' + hit.gridName + '」';
+    activeGridId = hit.gridId; mapStyles();
+    map.panTo(pt);
+    showGrid(hit, addrText);
+    document.querySelectorAll('.cat-item').forEach(n => n.classList.toggle('sel', +n.dataset.gid === hit.gridId));
+  } else {
+    msg.className = 'msg err'; msg.textContent = '地址「' + addrText + '」不在本图 32 个网格范围内（或在网格边界之外），请核对地址。';
+    document.getElementById('panel').classList.remove('on');
+  }
+}
+
+function searchAddress() {
+  const v = document.getElementById('addr').value.trim();
+  const msg = document.getElementById('addrMsg');
+  if (!v) { msg.className = 'msg err'; msg.textContent = '请输入订单地址。'; return; }
+  msg.className = 'msg'; msg.textContent = '正在解析地址…';
+  const gc = new BMap.Geocoder();
+  const q = /合肥/.test(v) ? v : ('合肥市' + v);
+  gc.getPoint(q, function (pt) {
+    if (pt) { locateByPoint(pt, v); }
+    else {
+      msg.className = 'msg err';
+      msg.textContent = '地址解析失败（可能是 AK 未开通地理编码权限或地址过于模糊）。可改用下方「按网格 / 工程师查找」，或直接点击地图上的网格查看负责工程师。';
+    }
+  }, CONFIG.city);
+}
+
+/* ------------------------------ 侧栏清单 ------------------------------ */
+function buildSidebar() {
+  const cat = document.getElementById('cat');
+  const sorted = GRIDS.slice().sort((a, b) => REGION_ORDER.indexOf(a.region) - REGION_ORDER.indexOf(b.region) || a.gridName.localeCompare(b.gridName, 'zh'));
+  cat.innerHTML = '';
+  sorted.forEach(g => {
+    const it = document.createElement('div'); it.className = 'cat-item'; it.dataset.gid = g.gridId;
+    const sw = document.createElement('div'); sw.className = 'cat-sw'; sw.style.background = g.color;
+    const body = document.createElement('div'); body.style.flex = '1';
+    const t = document.createElement('div');
+    t.innerHTML = '<span class="cat-name">' + g.gridName + '</span><span class="cat-reg">' + (g.region || '') + ' · ' + g.engs.length + '人</span>';
+    const es = document.createElement('div'); es.className = 'cat-engs';
+    g.engs.forEach(e => {
+      const d = document.createElement('span'); d.className = 'cat-eng';
+      const i = document.createElement('i'); i.style.background = ENG_COLOR[e.id] || '#64748b';
+      d.appendChild(i); d.appendChild(document.createTextNode(e.name)); es.appendChild(d);
+    });
+    body.appendChild(t); body.appendChild(es);
+    it.appendChild(sw); it.appendChild(body);
+    it.addEventListener('click', () => { document.getElementById('pAddr').setAttribute('data-addr', ''); focusGrid(g); });
+    cat.appendChild(it);
+  });
+  document.getElementById('catCnt').textContent = GRIDS.length + ' 个网格';
+
+  const gs = document.getElementById('gridSel');
+  GRIDS.slice().sort((a, b) => a.gridName.localeCompare(b.gridName, 'zh')).forEach(g => {
+    const o = document.createElement('option'); o.value = g.gridId; o.textContent = g.gridName + '（' + g.region + '）'; gs.appendChild(o);
+  });
+  const es = document.getElementById('engSel');
+  const names = Object.keys(ENG_NAMES).map(id => ({ id: id, name: ENG_NAMES[id], grids: GRIDS.filter(g => g.engs.some(e => e.id === id)) }))
+    .sort((a, b) => a.name.localeCompare(b.name, 'zh'));
+  names.forEach(e => {
+    const o = document.createElement('option'); o.value = e.id;
+    o.textContent = e.name + '（' + e.grids.length + '个网格）'; es.appendChild(o);
+  });
+
+  document.getElementById('addrBtn').onclick = searchAddress;
+  document.getElementById('addr').addEventListener('keydown', e => { if (e.key === 'Enter') searchAddress(); });
+  document.getElementById('pClose').onclick = () => { clearSelection(); };
+  document.getElementById('gridBtn').onclick = () => {
+    const g = BY_ID[+document.getElementById('gridSel').value]; if (g) { document.getElementById('pAddr').setAttribute('data-addr', ''); focusGrid(g); }
+  };
+  document.getElementById('engBtn').onclick = () => {
+    const id = document.getElementById('engSel').value;
+    const list = GRIDS.filter(g => g.engs.some(e => e.id === id));
+    if (!list.length) return;
+    hitSet = new Set(list.map(g => g.gridId)); mapStyles();
+    const all = []; list.forEach(g => g.points.forEach(p => all.push(new BMap.Point(p[0], p[1]))));
+    map.setViewport(all, { margins: [90, 90, 90, 90] });
+    setTimeout(() => showGrid(list[0], null), 320);
+  };
+  document.getElementById('btnName').onclick = function () {
+    showEngNames = !showEngNames;
+    this.classList.toggle('active', showEngNames);
+    this.textContent = '姓名标注：' + (showEngNames ? '开' : '关');
+    prepareLabels();          /* 开关会改变标签内容与尺寸，需重新量取 */
+    layoutLabels(true);
+  };
+  document.getElementById('btnReset').onclick = () => {
+    hitSet = null;
+    if (hitPoint) { map.removeOverlay(hitPoint); hitPoint = null; }
+    clearSelection();
+    fitAll();
+  };
+  /* 点击空白处：清空搜索命中，并取消网格选中（同一次点击落在网格上的事件不重复处理） */
+  map.addEventListener('click', () => {
+    if (IS_POSTER) return;
+    if (Date.now() - lastGridClickAt < 400) return;
+    if (hitSet) { hitSet = null; if (hitPoint) { map.removeOverlay(hitPoint); hitPoint = null; } }
+    clearSelection();
+  });
+}
+
+/* ------------------------------ 视图 ------------------------------ */
+/* 视野留白：出图时四边等距；交互时左侧让出侧栏宽度，避免网格被侧栏遮挡 */
+function viewMargins() {
+  return IS_POSTER ? [40, 40, 40, 40] : [110, 90, 60, 360];
+}
+function fitAll() {
+  const all = [];
+  GRIDS.forEach(g => g.points.forEach(p => all.push(new BMap.Point(p[0], p[1]))));
+  map.setViewport(all, { margins: viewMargins() });
+}
+
+/* ------------------------------ 启动 ------------------------------ */
+function loadBaiduMap() {
+  return new Promise((resolve, reject) => {
+    if (window.BMap) return resolve();
+    window.__bmapInit = function () { resolve(); };
+    const s = document.createElement('script');
+    s.src = 'https://api.map.baidu.com/api?v=3.0&ak=' + CONFIG.ak + '&callback=__bmapInit';
+    s.onerror = function () { reject(new Error('百度地图 API 加载失败')); };
+    document.head.appendChild(s);
+  });
+}
+
+function afterReady() {
+  if (!IS_POSTER) buildSidebar();
+  fitAll();
+  setTimeout(function () {
+    prepareLabels();          /* 一次性预计算锚点与标签尺寸 */
+    layoutLabels(true);
+    map.addEventListener('zoomend', onZoomEnd);
+    window.addEventListener('resize', onResize);
+    document.getElementById('loading').style.display = 'none';
+    document.body.setAttribute('data-ready', '1');
+  }, 700);
+}
+
+loadBaiduMap().then(function () {
+  labelLayer = document.getElementById('labelLayer');
+  map = new BMap.Map('map', { enableMapClick: false, minZoom: 8, maxZoom: 18 });
+  map.centerAndZoom(new BMap.Point(CONFIG.center[0], CONFIG.center[1]), 11);
+  map.enableScrollWheelZoom(true);
+  /* 不调用 setMapStyleV2：保持默认底图，路网与地名正常显示 */
+  drawGrids();
+  if (IS_POSTER) document.body.classList.add('poster');
+  document.getElementById('topSub').textContent =
+    '共 ' + GRIDS.length + ' 个网格 / ' + ENG_COUNT + ' 位工程师 · 数据来源：天工系统（' + DATA_DATE + '）';
+  document.getElementById('ptSub').textContent =
+    '全城总览 ｜ ' + GRIDS.length + ' 个网格 · ' + ENG_COUNT + ' 位工程师 · ' + BIND_COUNT + ' 条网格负责关系 ｜ 数据来源：天工系统 ' + DATA_DATE;
+  document.getElementById('scGrid').textContent = GRIDS.length;
+  document.getElementById('scEng').textContent = ENG_COUNT;
+  document.getElementById('scBind').textContent = BIND_COUNT;
+  document.getElementById('pnStopCnt').textContent = STOP_CNT;
+  let done = false;
+  const go = function () { if (done) return; done = true; afterReady(); };
+  map.addEventListener('tilesloaded', go);
+  setTimeout(go, 15000);
+}).catch(function (e) {
+  document.getElementById('loading').textContent = '地图加载失败：' + e.message;
+});
+</script>
+</body>
+</html>
