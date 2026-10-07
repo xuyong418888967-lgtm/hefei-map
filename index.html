@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <title>合肥3C站点 · 工程师网格地图</title>
 <style>
   *{box-sizing:border-box;-webkit-font-smoothing:antialiased;}
@@ -138,7 +138,7 @@
   #drawerHandle{display:none;}
 
   @media (max-width:820px), (orientation:landscape) and (max-height:600px){
-    body{--m-handle-h:46px;}
+    body{--m-handle-h:52px;}
 
     /* --- 地图铺满动态视口（地址栏收放 / 旋转后不留白） --- */
     #map{width:100vw;height:100vh;height:100dvh;}
@@ -174,6 +174,9 @@
       z-index:38;
     }
     body.drawer-open #side{transform:translateY(0);pointer-events:auto;}
+    /* 关键修复：抽屉是纵向 flex 容器，若子项可收缩会被「网格清单」挤成 0 高，
+       导致展开后「订单地址搜索 / 查找」两张卡片被压成一条线、输入框永远看不见 */
+    #side > *{flex:0 0 auto;}
     #side > .card{margin:10px calc(10px + env(safe-area-inset-right)) 0 calc(10px + env(safe-area-inset-left));}
     #side > .card:last-of-type{margin-bottom:calc(12px + env(safe-area-inset-bottom));}
     #catWrap{flex:0 0 auto;min-height:0;overflow:visible;}      /* 由抽屉整体滚动，避免嵌套滚动条 */
@@ -191,11 +194,12 @@
       box-shadow:0 -6px 18px rgba(15,23,42,.14);
       font-size:12.5px;font-weight:800;color:#334155;
       cursor:pointer;pointer-events:auto;
+      touch-action:manipulation;                /* 取消双击缩放延迟，点按立即响应 */
       user-select:none;-webkit-user-select:none;-webkit-tap-highlight-color:transparent;
     }
-    #drawerHandle .dh-grip{flex:0 0 auto;width:30px;height:4px;border-radius:2px;background:rgba(15,23,42,.22);}
+    #drawerHandle .dh-grip{flex:0 0 auto;width:34px;height:5px;border-radius:3px;background:rgba(15,23,42,.28);}
     #drawerHandle .dh-text{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-    #drawerHandle .dh-arrow{flex:0 0 auto;font-size:11.5px;font-weight:800;color:#1d4ed8;}
+    #drawerHandle .dh-arrow{flex:0 0 auto;font-size:12px;font-weight:800;color:#1d4ed8;}
 
     /* --- 卡片内部：文字换行不溢出、字号适配触屏 --- */
     .card-t{flex-wrap:wrap;gap:2px 8px;padding:8px 11px;font-size:12px;}
@@ -270,7 +274,7 @@
 <aside id="side">
   <div id="drawerHandle" role="button" tabindex="0" aria-expanded="false" aria-label="展开或收起面板">
     <span class="dh-grip"></span>
-    <span class="dh-text">搜索 / 查找 / 网格清单</span>
+    <span class="dh-text">搜索订单地址 / 网格清单</span>
     <span class="dh-arrow" id="drawerArrow">展开 ▲</span>
   </div>
   <div class="card">
@@ -430,6 +434,7 @@ function boundaryDist(p, poly) {
 let map = null, labelLayer = null, labelItems = [], labelBaseFont = 0, anchorsReady = false;
 let labelSig = '', lastZoomLevel = -1, layoutTimer = null, measureHost = null;
 let showEngNames = true, activeGridId = null, hitSet = null, hitPoint = null, lastGridClickAt = 0;
+let vpTimer = null, vpTimer2 = null, lastVpW = (window.innerWidth || 0);   /* 横竖屏 / 视口变化重算 */
 
 /* 网格面/边状态：常态 / 选中（仅交互页）/ 搜索命中 / 非命中淡出；海报模式恒为常态 */
 function gridStyleFor(g) {
@@ -856,17 +861,37 @@ function onZoomEnd() {
   layoutTimer = setTimeout(function () { layoutTimer = null; layoutLabels(false); }, 120);
 }
 
-/* 窗口尺寸变化：字号档位随窗口宽度变化，需重新量尺寸（去抖，避免拖窗口时频繁重排）；
-   移动端（含横竖屏切换）额外收起抽屉并按最终尺寸重新装框，保证网格不被面板压住 */
-function onResize() {
+/* 让百度内核按「当前真实容器尺寸」重算画布/瓦片与投影：
+   手机旋转时 resize 往往早于最终布局落地，只靠百度自身监听会量到旧尺寸，
+   必须显式 checkResize，横屏地图才会真正铺满并重新居中 */
+function mapCheckResize() {
+  if (!map) return;
+  try { if (typeof map.checkResize === 'function') map.checkResize(); } catch (e) { /* 个别内核无此 API：忽略 */ }
+}
+
+/* 视口变化统一收口（去抖 + 二次补算）：
+   横竖屏切换 / 地址栏收放 / 软键盘弹出 / 桌面拖窗口 全部走这里，
+   保证任何一次尺寸变化后，地图容器与抽屉、详情面板都按最终尺寸重排 */
+function onViewportChange() {
   if (layoutTimer) clearTimeout(layoutTimer);
-  layoutTimer = setTimeout(function () {
-    layoutTimer = null;
-    if (!anchorsReady) return;
-    if (isDrawerMode()) { setDrawer(false); afterDrawerChange(320); return; }
-    prepareLabels();
-    layoutLabels(true);
-  }, 200);
+  layoutTimer = setTimeout(finishViewportChange, 200);
+}
+function finishViewportChange() {
+  layoutTimer = null;
+  const w = window.innerWidth || 0;
+  const crossed = Math.abs(w - lastVpW) > 24;      /* 宽度变了 ⇒ 横竖屏切换 / 跨断点 */
+  lastVpW = w;
+  mapCheckResize();                                /* 先按新容器尺寸重算地图 */
+  if (!anchorsReady) return;
+  if (crossed && isDrawerMode()) {
+    setDrawer(false);                              /* 旋转后先收起抽屉，把地图让满 */
+    afterDrawerChange(320);                        /* 动画结束后重新量标签 + 装框（重新居中） */
+  } else {
+    prepareLabels();                               /* 仅高度变化（地址栏收放 / 键盘）：只重排标签， */
+    layoutLabels(true);                            /* 不强制改缩放，避免打字时地图跳动 */
+  }
+  if (vpTimer2) clearTimeout(vpTimer2);
+  vpTimer2 = setTimeout(function () { vpTimer2 = null; mapCheckResize(); }, 520);   /* 兜住 iOS 旋转尾抖动 */
 }
 
 /* ------------------------------ 交互：提示 / 详情 ------------------------------ */
@@ -1108,19 +1133,60 @@ function refitView() {
   fitAll();
 }
 function afterDrawerChange(delay) { setTimeout(refitView, delay || 320); }
+/* 展开抽屉：回到顶部（保证「订单地址搜索」卡片首屏可见）并聚焦地址输入框 */
+function openDrawer() {
+  if (IS_POSTER) return;
+  setDrawer(true);
+  const side = document.getElementById('side');
+  if (side) side.scrollTop = 0;
+  const a = document.getElementById('addr');
+  if (a && !a.value.trim()) {
+    try { a.focus({ preventScroll: true }); } catch (e) { try { a.focus(); } catch (e2) { /* 忽略 */ } }
+  }
+  afterDrawerChange(340);                   /* 等展开动画结束再按新尺寸重排 */
+}
+function closeDrawer() {
+  if (IS_POSTER) return;
+  setDrawer(false);
+  afterDrawerChange(340);
+}
 function bindDrawer() {
   const h = document.getElementById('drawerHandle');
   if (!h || h.dataset.bound === '1') return;
   h.dataset.bound = '1';
-  const toggle = function () {
-    if (IS_POSTER) return;
-    setDrawer(!isDrawerOpen());
-    afterDrawerChange(340);                 /* 等收起/展开动画结束再重排 */
-  };
-  h.addEventListener('click', toggle);
+  let downY = 0, downX = 0, moved = 0, swiped = false, swallowClick = 0;
+  const toggle = function () { if (isDrawerOpen()) closeDrawer(); else openDrawer(); };
+
+  /* 轻点（touchend 合成的 click）开合 */
+  h.addEventListener('click', function (e) {
+    if (Date.now() < swallowClick) { e.preventDefault(); e.stopPropagation(); return; }  /* 已按滑动处理，忽略本次 click */
+    toggle();
+  });
   h.addEventListener('keydown', function (e) {
     if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); }
   });
+
+  /* 上滑展开 / 下滑收起：位移够大才只按手势处理，位移小仍走 click，两种手势都稳 */
+  h.addEventListener('touchstart', function (e) {
+    if (e.touches.length !== 1) { moved = 99; return; }
+    downY = e.touches[0].clientY; downX = e.touches[0].clientX; moved = 0; swiped = false;
+  }, { passive: true });
+  h.addEventListener('touchmove', function (e) {
+    if (e.touches.length !== 1 || moved > 90) return;
+    const dy = e.touches[0].clientY - downY, dx = e.touches[0].clientX - downX;
+    moved = Math.max(moved, Math.abs(dy), Math.abs(dx));
+    if (Math.abs(dy) > 10 && Math.abs(dy) > Math.abs(dx)) {
+      if (Math.abs(dy) > 18) swiped = true;
+      if (e.cancelable) e.preventDefault();   /* 手势期间不让页面跟着滚，避免抽屉抖动 */
+    }
+  }, { passive: false });
+  h.addEventListener('touchend', function (e) {
+    const t = e.changedTouches && e.changedTouches[0];
+    const dy = t ? (t.clientY - downY) : 0;
+    if (!swiped || Math.abs(dy) < 26) return;      /* 位移不够：交给 click 兜底，避免误触 */
+    swallowClick = Date.now() + 800;
+    if (dy < 0) openDrawer(); else closeDrawer();
+  }, { passive: true });
 }
 function fitAll() {
   const all = [];
@@ -1149,10 +1215,21 @@ function afterReady() {
     prepareLabels();          /* 一次性预计算锚点与标签尺寸 */
     layoutLabels(true);
     map.addEventListener('zoomend', onZoomEnd);
-    window.addEventListener('resize', onResize);
-    if (window.matchMedia) {                      /* 旋转 / 跨越断点：收起抽屉并重排 */
+    /* 尺寸重算三重保险：resize（旋转 / 地址栏收放 / 拖窗口）、
+       orientationchange（部分机型只有它准确）、visualViewport（iOS 键盘与缩放） */
+    window.addEventListener('resize', onViewportChange);
+    window.addEventListener('orientationchange', onViewportChange);
+    if (window.visualViewport) {
+      window.visualViewport.addEventListener('resize', onViewportChange);
+      window.visualViewport.addEventListener('scroll', onViewportChange);
+    }
+    window.addEventListener('pageshow', function () {   /* 从后台切回：视口可能已变（如旋转后回前台） */
+      lastVpW = (window.innerWidth || 0);
+      onViewportChange();
+    });
+    if (window.matchMedia) {                      /* 跨越断点（平板 / 桌面窗口缩放）：收起抽屉并重排 */
       const mq = window.matchMedia(DRAWER_MQ);
-      const onMq = function () { if (!IS_POSTER) { setDrawer(false); afterDrawerChange(300); } };
+      const onMq = function () { if (!IS_POSTER) { setDrawer(false); afterDrawerChange(300); mapCheckResize(); } };
       if (mq.addEventListener) mq.addEventListener('change', onMq);
       else if (mq.addListener) mq.addListener(onMq);
     }
